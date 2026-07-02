@@ -83,6 +83,8 @@ async function main() {
 
     const stats = await collectWeeklyStats(context.request, targetWeek);
     const rows = buildCsvRows(stats, timezone);
+    const comparisonStats = await collectPreviousWeeklyStats(context.request, stats);
+    const comparisonRows = buildCsvRows(comparisonStats, timezone);
 
     if (rows.length === 0) {
       throw new Error('取得できた記事別スタッツが 0 件でした。note の画面で対象週のデータを確認してください。');
@@ -112,6 +114,7 @@ async function main() {
       rowCount: rows.length,
       collectedAt: rows[0][7],
       rows,
+      comparisonRows,
     });
   } finally {
     await browser.close();
@@ -278,20 +281,39 @@ async function collectWeeklyStats(request, targetWeek) {
     sort: 'pv',
   };
 
-  let stats = await fetchStatsPage(request, baseParams);
+  let stats = await collectWeeklyStatsFromParams(request, baseParams);
 
   if (targetWeek === 'previous') {
     if (!stats.endDate) {
       throw new Error('前週取得に必要な endDate が API 応答にありません。');
     }
 
-    stats = await fetchStatsPage(request, {
+    stats = await collectWeeklyStatsFromParams(request, {
       ...baseParams,
       end_date: stats.endDate,
       span: 'prev',
     });
   }
 
+  return stats;
+}
+
+async function collectPreviousWeeklyStats(request, stats) {
+  if (!stats.endDate) {
+    throw new Error('前週比較に必要な endDate が API 応答にありません。');
+  }
+
+  return collectWeeklyStatsFromParams(request, {
+    filter: 'weekly',
+    page: 1,
+    sort: 'pv',
+    end_date: stats.endDate,
+    span: 'prev',
+  });
+}
+
+async function collectWeeklyStatsFromParams(request, params) {
+  let stats = await fetchStatsPage(request, params);
   const firstPage = stats;
   const noteStats = [...(firstPage.noteStats ?? [])];
   let page = 1;
@@ -356,6 +378,7 @@ async function sendSlackNotification({
   rowCount,
   collectedAt,
   rows,
+  comparisonRows = [],
 }) {
   if (!webhookUrl) {
     return;
@@ -363,19 +386,26 @@ async function sendSlackNotification({
 
   const resolvedOutputFile = path.resolve(outputFile);
   const totals = summarizeRows(rows);
-  const articleSummary = formatSlackArticleSummary(rows);
+  const comparisonTotals = comparisonRows.length > 0 ? summarizeRows(comparisonRows) : null;
+  const articleSummary = formatSlackArticleSummary(rows, comparisonRows);
   const payload = {
     text: [
       'note スタッツ取得が完了しました。',
       `期間: ${periodStart} - ${periodEnd}`,
       `記事数: ${rowCount}`,
       `合計: ${totals.views} views / ${totals.likes} likes / ${totals.comments} comments`,
+      comparisonTotals
+        ? `前週比: ${formatDelta(totals.views - comparisonTotals.views)} views / ${formatDelta(totals.likes - comparisonTotals.likes)} likes / ${formatDelta(totals.comments - comparisonTotals.comments)} comments`
+        : '前週比: 比較データなし',
+      comparisonRows.length > 0
+        ? `比較対象: ${comparisonRows[0][0]} - ${comparisonRows[0][1]}`
+        : null,
       `CSV: ${resolvedOutputFile}`,
       `取得日時: ${collectedAt}`,
       '',
       '記事別:',
       articleSummary,
-    ].join('\n'),
+    ].filter(Boolean).join('\n'),
   };
 
   const response = await fetch(webhookUrl, {
@@ -405,13 +435,26 @@ function summarizeRows(rows) {
   );
 }
 
-function formatSlackArticleSummary(rows) {
+function formatSlackArticleSummary(rows, comparisonRows = []) {
+  const comparisonByArticle = new Map(
+    comparisonRows.map((row) => [articleComparisonKey(row), row]),
+  );
   const visibleRows = rows.slice(0, MAX_SLACK_ARTICLES);
   const lines = visibleRows.map((row, index) => {
     const title = escapeSlackText(row[3]).replaceAll('|', '｜');
     const url = row[2];
     const article = url ? `<${url}|${title}>` : title;
-    return `${index + 1}. ${article} — ${row[4]} views / ${row[5]} likes / ${row[6]} comments`;
+    const previousRow = comparisonByArticle.get(articleComparisonKey(row));
+    const viewsDelta = numberValue(row[4]) - numberValue(previousRow?.[4]);
+    const likesDelta = numberValue(row[5]) - numberValue(previousRow?.[5]);
+    const commentsDelta = numberValue(row[6]) - numberValue(previousRow?.[6]);
+
+    return [
+      `${index + 1}. ${article} —`,
+      `${row[4]} views (${formatDelta(viewsDelta)}) /`,
+      `${row[5]} likes (${formatDelta(likesDelta)}) /`,
+      `${row[6]} comments (${formatDelta(commentsDelta)})`,
+    ].join(' ');
   });
 
   if (rows.length > MAX_SLACK_ARTICLES) {
@@ -419,6 +462,23 @@ function formatSlackArticleSummary(rows) {
   }
 
   return lines.join('\n');
+}
+
+function articleComparisonKey(row) {
+  return row[2] || row[3];
+}
+
+function formatDelta(value) {
+  const number = numberValue(value);
+  if (number > 0) {
+    return `+${number}`;
+  }
+
+  if (number < 0) {
+    return String(number);
+  }
+
+  return '±0';
 }
 
 function escapeSlackText(value) {
