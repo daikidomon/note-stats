@@ -26,7 +26,10 @@ cp .env.example .env
 NOTE_EMAIL=your-email@example.com
 NOTE_PASSWORD=your-password
 NOTE_TARGET_WEEK=previous
+SLACK_WEBHOOK_URL=
 ```
+
+Slack 通知を使う場合は、`.env` に `SLACK_WEBHOOK_URL` を設定します。取得成功後に、対象期間・記事数・合計値・記事別スタッツ・CSV 保存先を通知します。記事別スタッツは Slack メッセージ上で確認できるよう、閲覧数順に最大20件まで表示します。
 
 ## 手動実行
 
@@ -60,6 +63,7 @@ MFA や Captcha が出る場合、GitHub Actions の自動ログインは失敗�
 - 出力先: `/home/ubuntu/note-stats/data`
 - 認証情報: `/home/ubuntu/note-stats/.env`
 - ログイン状態: `/home/ubuntu/note-stats/.auth/note-storage-state.json`
+- Slack通知: `.env` の `SLACK_WEBHOOK_URL`
 
 timer の設定は以下です。
 

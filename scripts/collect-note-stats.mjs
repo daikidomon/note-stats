@@ -14,6 +14,7 @@ const DEFAULT_STORAGE_STATE = '.auth/note-storage-state.json';
 const DEFAULT_OUTPUT_DIR = 'data';
 const DEFAULT_TIMEZONE = 'Asia/Tokyo';
 const DEFAULT_TARGET_WEEK = 'previous';
+const MAX_SLACK_ARTICLES = 20;
 const CSV_HEADERS = [
   'period_start',
   'period_end',
@@ -40,6 +41,7 @@ async function main() {
   const headless = envBool('HEADLESS', !loginOnly);
   const storageStatePath = process.env.NOTE_STORAGE_STATE || DEFAULT_STORAGE_STATE;
   const targetWeek = process.env.NOTE_TARGET_WEEK || DEFAULT_TARGET_WEEK;
+  const slackWebhookUrl = process.env.SLACK_WEBHOOK_URL;
   const email = process.env.NOTE_EMAIL;
   const password = process.env.NOTE_PASSWORD;
 
@@ -101,6 +103,16 @@ async function main() {
     console.log(`CSV を保存しました: ${outputFile}`);
     console.log(`期間: ${rows[0][0]} - ${rows[0][1]}`);
     console.log(`記事数: ${rows.length}`);
+
+    await sendSlackNotification({
+      webhookUrl: slackWebhookUrl,
+      outputFile,
+      periodStart: rows[0][0],
+      periodEnd: rows[0][1],
+      rowCount: rows.length,
+      collectedAt: rows[0][7],
+      rows,
+    });
   } finally {
     await browser.close();
   }
@@ -334,6 +346,86 @@ async function fetchStatsPage(request, params) {
   }
 
   return data;
+}
+
+async function sendSlackNotification({
+  webhookUrl,
+  outputFile,
+  periodStart,
+  periodEnd,
+  rowCount,
+  collectedAt,
+  rows,
+}) {
+  if (!webhookUrl) {
+    return;
+  }
+
+  const resolvedOutputFile = path.resolve(outputFile);
+  const totals = summarizeRows(rows);
+  const articleSummary = formatSlackArticleSummary(rows);
+  const payload = {
+    text: [
+      'note スタッツ取得が完了しました。',
+      `期間: ${periodStart} - ${periodEnd}`,
+      `記事数: ${rowCount}`,
+      `合計: ${totals.views} views / ${totals.likes} likes / ${totals.comments} comments`,
+      `CSV: ${resolvedOutputFile}`,
+      `取得日時: ${collectedAt}`,
+      '',
+      '記事別:',
+      articleSummary,
+    ].join('\n'),
+  };
+
+  const response = await fetch(webhookUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const body = await response.text();
+  if (!response.ok) {
+    throw new Error(`Slack 通知に失敗しました: HTTP ${response.status} ${body.slice(0, 200)}`);
+  }
+
+  console.log('Slack 通知を送信しました。');
+}
+
+function summarizeRows(rows) {
+  return rows.reduce(
+    (totals, row) => ({
+      views: totals.views + numberValue(row[4]),
+      likes: totals.likes + numberValue(row[5]),
+      comments: totals.comments + numberValue(row[6]),
+    }),
+    { views: 0, likes: 0, comments: 0 },
+  );
+}
+
+function formatSlackArticleSummary(rows) {
+  const visibleRows = rows.slice(0, MAX_SLACK_ARTICLES);
+  const lines = visibleRows.map((row, index) => {
+    const title = escapeSlackText(row[3]).replaceAll('|', '｜');
+    const url = row[2];
+    const article = url ? `<${url}|${title}>` : title;
+    return `${index + 1}. ${article} — ${row[4]} views / ${row[5]} likes / ${row[6]} comments`;
+  });
+
+  if (rows.length > MAX_SLACK_ARTICLES) {
+    lines.push(`...ほか ${rows.length - MAX_SLACK_ARTICLES} 件`);
+  }
+
+  return lines.join('\n');
+}
+
+function escapeSlackText(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
 }
 
 function normalizeStatsData(data) {
