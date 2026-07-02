@@ -1,0 +1,17 @@
+{
+  "name": "note-stats",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "collect": "node scripts/collect-note-stats.mjs",
+    "auth": "HEADLESS=false node scripts/collect-note-stats.mjs --login-only",
+    "check": "node --check scripts/collect-note-stats.mjs"
+  },
+  "dependencies": {
+    "@openai/codex": "^0.142.5"
+  },
+  "devDependencies": {
+    "playwright": "^1.61.1"
+  }
+}
