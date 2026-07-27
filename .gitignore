@@ -4,6 +4,9 @@ node_modules/
 playwright-report/
 test-results/
 
+# Weekly stats CSV data (not tracked in git)
+data/*.csv
+
 # Derived SQLite DB (rebuild from CSV with `npm run migrate`)
 data/*.db
 data/*.db-wal
