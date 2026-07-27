@@ -5,6 +5,7 @@ import process from 'node:process';
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { chromium } from 'playwright';
+import { openDb, upsertRows } from './db.mjs';
 
 const NOTE_ORIGIN = 'https://note.com';
 const NOTE_LOGIN_URL = `${NOTE_ORIGIN}/login`;
@@ -14,6 +15,7 @@ const DEFAULT_STORAGE_STATE = '.auth/note-storage-state.json';
 const DEFAULT_OUTPUT_DIR = 'data';
 const DEFAULT_TIMEZONE = 'Asia/Tokyo';
 const DEFAULT_TARGET_WEEK = 'previous';
+const DEFAULT_DASHBOARD_URL = 'http://100.109.191.75:8080';
 const MAX_SLACK_ARTICLES = 20;
 const CSV_HEADERS = [
   'period_start',
@@ -42,6 +44,7 @@ async function main() {
   const storageStatePath = process.env.NOTE_STORAGE_STATE || DEFAULT_STORAGE_STATE;
   const targetWeek = process.env.NOTE_TARGET_WEEK || DEFAULT_TARGET_WEEK;
   const slackWebhookUrl = process.env.SLACK_WEBHOOK_URL;
+  const dashboardUrl = process.env.DASHBOARD_URL || DEFAULT_DASHBOARD_URL;
   const email = process.env.NOTE_EMAIL;
   const password = process.env.NOTE_PASSWORD;
 
@@ -102,12 +105,18 @@ async function main() {
     await mkdir(path.dirname(outputFile), { recursive: true });
     await writeFile(outputFile, csv, 'utf8');
 
+    const db = openDb();
+    upsertRows(db, rows);
+    db.close();
+
     console.log(`CSV を保存しました: ${outputFile}`);
+    console.log(`SQLite に保存しました: ${rows.length} 行`);
     console.log(`期間: ${rows[0][0]} - ${rows[0][1]}`);
     console.log(`記事数: ${rows.length}`);
 
     await sendSlackNotification({
       webhookUrl: slackWebhookUrl,
+      dashboardUrl,
       outputFile,
       periodStart: rows[0][0],
       periodEnd: rows[0][1],
@@ -372,6 +381,7 @@ async function fetchStatsPage(request, params) {
 
 async function sendSlackNotification({
   webhookUrl,
+  dashboardUrl,
   outputFile,
   periodStart,
   periodEnd,
@@ -400,6 +410,7 @@ async function sendSlackNotification({
       comparisonRows.length > 0
         ? `比較対象: ${comparisonRows[0][0]} - ${comparisonRows[0][1]}`
         : null,
+      dashboardUrl ? `ダッシュボード: ${dashboardUrl}` : null,
       `CSV: ${resolvedOutputFile}`,
       `取得日時: ${collectedAt}`,
       '',

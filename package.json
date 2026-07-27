@@ -6,7 +6,11 @@
   "scripts": {
     "collect": "node scripts/collect-note-stats.mjs",
     "auth": "HEADLESS=false node scripts/collect-note-stats.mjs --login-only",
-    "check": "node --check scripts/collect-note-stats.mjs"
+    "check": "node --check scripts/collect-note-stats.mjs",
+    "migrate": "node scripts/migrate-csv-to-sqlite.mjs",
+    "serve": "node server/server.mjs",
+    "dashboard:build": "npm --prefix dashboard install && npm --prefix dashboard run build",
+    "dashboard:dev": "npm --prefix dashboard run dev"
   },
   "dependencies": {
     "@openai/codex": "^0.142.5"

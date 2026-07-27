@@ -3,3 +3,11 @@ node_modules/
 .auth/
 playwright-report/
 test-results/
+
+# Derived SQLite DB (rebuild from CSV with `npm run migrate`)
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# Dashboard build output
+dashboard/dist/
